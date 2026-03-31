@@ -5,8 +5,9 @@ import os
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 # --- SETUP ---
-# Put your Gemini API key here inside the quotes
-os.environ["GOOGLE_API_KEY"] = "AIzaSyDX-bzGkAdUbCiEbovBPle1BI90iR8J4Ns"
+# DO NOT paste the actual key here !!
+# This tells Python to look for a hidden environment variable
+GOOGLE_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 app = FastAPI(title="Smart Calendar Agent")
 
