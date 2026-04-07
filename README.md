@@ -39,6 +39,14 @@ If Busy: System returns a CONFLICT status and waits for user resolution.
 
 Visualization: Streamlit fetches data from the API to display a clean schedule table.
 
+## 🔮 Future Scope & Known Limitations
+
+While this prototype successfully demonstrates the core Human-in-the-Loop (HITL) architecture, the following upgrades are planned for production readiness:
+
+* **Persistent Database Migration:** Currently, the system uses a local SQLite database, which resets when the serverless Cloud Run instance spins down to save resources. The next planned step is migrating to **Google Cloud SQL (PostgreSQL)** for permanent, scalable state management.
+* **Full Date & Timezone Support:** Expanding the Gemini NLP extraction to handle specific calendar dates (not just daily time slots) and standardizing all backend times to UTC to support users across different global timezones.
+* **Task Deletion & Modification:** Implementing a new conversational intent that allows users to seamlessly delete or modify existing calendar events via chat (e.g., *"Cancel my 2 PM meeting"* or *"Move the marketing sync to tomorrow"*).
+
 ## 🎖 Acknowledgments
 Special thanks to the following organizations for the opportunity and resources provided during the **Gen AI Academy APAC Edition**:
 
