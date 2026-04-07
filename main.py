@@ -1,111 +1,65 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-import sqlite3
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI
+from fastapi import FastAPI
+import google.generativeai as genai
+from pydantic import BaseModel
 
-# --- SETUP ---
-# DO NOT paste the actual key here !!
-# This tells Python to look for a hidden environment variable
-GOOGLE_API_KEY = os.environ.get("GEMINI_API_KEY")
+# 🔹 Import the Specialists (Tools) we just built!
+from agent_tools import add_new_task, book_calendar_slot, delete_calendar_slot
 
-app = FastAPI(title="Smart Calendar Agent")
+# 1. Setup FastAPI 
+app = FastAPI(title="Multi-Agent Productivity Assistant")
 
-# Initialize the AI translator tool
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+# Configure Gemini securely using the environment variable
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# --- DATA FORMATS ---
-class TaskRequest(BaseModel):
-    user_input: str
+# 2. Define the Supervisor Identity (The Brain)
+supervisor_instructions = """
+You are the Executive Supervisor of a Multi-Agent Productivity System.
+Your job is to manage the user's schedule and to-do list using your tools.
 
-class ConflictResolution(BaseModel):
-    time_slot: str
-    winner_task: str
-    displaced_task: str
-    new_time_for_displaced: str
+You have three specialists (tools) on your team:
+1. add_new_task: Use this when the user wants to add something to their to-do list.
+2. book_calendar_slot: Use this when a user wants to schedule an event. 
+   CRITICAL: You must convert all times to 24-hour format (HH:MM) before using this tool. Assume PM if ambiguous (e.g., "2" means "14:00").
+3. delete_calendar_slot: Use this when a user wants to cancel or remove an event.
 
-# --- HELPER FUNCTION ---
-def check_calendar(time_slot: str):
-    """Checks the database to see if a time slot is taken."""
-    conn = sqlite3.connect('my_calendar.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT task_name FROM schedule WHERE time_slot = ?', (time_slot,))
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else None
+INSTRUCTIONS:
+- Break down the user's request. If they ask for multiple things (e.g., "Add a task AND schedule it"), use the tools sequentially.
+- If a tool returns a CONFLICT message, stop and ask the user how they want to resolve it.
+- Once the tools succeed, give the user a brief, friendly summary of what was accomplished.
+"""
 
-# --- ENDPOINT 1: The AI Agent Ingests the Task ---
-@app.post("/schedule-task")
-def schedule_task(request: TaskRequest):
-    # 1. AI parses the messy human input
-    prompt = f"""
-    Extract the task name and the time from this sentence: "{request.user_input}"
-    Return ONLY a comma-separated string like this: Task Name, Time
-    Example output: Client Meeting, 10:00 AM
-    """
-    ai_response = llm.invoke(prompt).content.strip()
-    
+# Initialize the Manager with the tools and instructions
+model = genai.GenerativeModel(
+    model_name="gemini-2.5-flash",
+    system_instruction=supervisor_instructions,
+    tools=[add_new_task, book_calendar_slot, delete_calendar_slot] # Handing the tools to the Manager
+)
+
+# Start a chat session that allows the Manager to run the Python functions autonomously
+chat = model.start_chat(enable_automatic_function_calling=True)
+
+# 3. Define the API Request Body
+class UserRequest(BaseModel):
+    prompt: str
+
+# 4. Create the API Endpoint
+@app.post("/chat")
+async def chat_endpoint(request: UserRequest):
     try:
-        new_task, requested_time = [item.strip() for item in ai_response.split(',')]
-    except:
-        return {"error": "AI could not understand the time or task. Try again!"}
+        # Send the user's message to the Supervisor
+        response = chat.send_message(request.prompt)
+        return {"status": "success", "response": response.text}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
-    # 2. Check Database for Conflicts
-    existing_task = check_calendar(requested_time)
+# Basic health check endpoint
+@app.get("/")
+def read_root():
+    return {"message": "Supervisor Agent is Online."}
 
-    # 3. Handle the logic
-    if existing_task:
-        # CONFLICT DETECTED! Ask the user what to do.
-        return {
-            "status": "CONFLICT",
-            "message": f"Wait! You already have '{existing_task}' scheduled at {requested_time}.",
-            "action_required": "Please use the /resolve-conflict endpoint to decide which task gets this slot, and provide a new time for the other one."
-        }
-    else:
-        # FREE SLOT! Book it.
-        conn = sqlite3.connect('my_calendar.db')
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO schedule (time_slot, task_name) VALUES (?, ?)', (requested_time, new_task))
-        conn.commit()
-        conn.close()
-        return {"status": "SUCCESS", "message": f"Booked '{new_task}' at {requested_time}."}
-
-# --- ENDPOINT 2: Human-in-the-Loop Resolution ---
-@app.post("/resolve-conflict")
-def resolve_conflict(resolution: ConflictResolution):
-    conn = sqlite3.connect('my_calendar.db')
-    cursor = conn.cursor()
-    
-    # 1. Update the disputed slot with the winner
-    cursor.execute('UPDATE schedule SET task_name = ? WHERE time_slot = ?', (resolution.winner_task, resolution.time_slot))
-    
-    # 2. Book the new slot for the loser
-    try:
-        cursor.execute('INSERT INTO schedule (time_slot, task_name) VALUES (?, ?)', (resolution.new_time_for_displaced, resolution.displaced_task))
-    except sqlite3.IntegrityError:
-        conn.close()
-        return {"error": f"Failed! {resolution.new_time_for_displaced} is ALSO taken!"}
-    
-    conn.commit()
-    conn.close()
-    
-    return {
-        "status": "RESOLVED", 
-        "message": f"Done! {resolution.time_slot} is now '{resolution.winner_task}'. The displaced task '{resolution.displaced_task}' is moved to {resolution.new_time_for_displaced}."
-    }
-
-# --- ENDPOINT 3: View the Calendar ---
-@app.get("/view-calendar")
-def view_calendar():
-    conn = sqlite3.connect('my_calendar.db')
-    cursor = conn.cursor()
-    
-    # Grab everything from the schedule table
-    cursor.execute('SELECT time_slot, task_name FROM schedule')
-    rows = cursor.fetchall()
-    conn.close()
-    
-    # Format the data into a clean list of dictionaries
-    schedule_list = [{"Time": row[0], "Task": row[1]} for row in rows]
-    
-    return {"status": "SUCCESS", "schedule": schedule_list}
+if __name__ == "__main__":
+    import uvicorn
+    # Cloud Run injects the PORT environment variable, defaulting to 8080
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)

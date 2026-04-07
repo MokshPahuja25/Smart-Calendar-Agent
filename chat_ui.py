@@ -1,75 +1,86 @@
 import streamlit as st
 import requests
+import pandas as pd
+import sqlite3
 
-# Put your live Cloud Run API link here (do NOT include /docs at the end)
-API_URL = "https://smart-calendar-agent-761950427575.asia-south2.run.app" 
+# --- Configuration ---
+st.set_page_config(page_title="Multi-Agent Assistant", layout="wide")
+st.title("🤖 Multi-Agent Productivity Assistant")
 
-st.title("📅 Smart Calendar Agent")
-st.write("Chat with your AI assistant to schedule tasks!")
-# The Sidebar Dashboard
-with st.sidebar:
-    st.header("📊 Dashboard")
-    st.write("Check your current schedule.")
+# FastAPI backend URL and Database name
+API_URL = "http://127.0.0.1:8080/chat"
+DB_NAME = "my_calendar.db"
+
+# --- Layout: Two Columns ---
+col1, col2 = st.columns([1, 1])
+
+# --- LEFT COLUMN: Chat Interface ---
+with col1:
+    st.subheader("💬 Chat with your Manager Agent")
     
-    # When the user clicks this button...
-    if st.button("📅 View Calendar Table"):
-        # Make a GET request to your new API door
-        response = requests.get(f"{API_URL}/view-calendar")
-        
-        if response.status_code == 200:
-            data = response.json()
-            schedule = data.get("schedule", [])
-            
-            if schedule:
-                st.success("Your Schedule:")
-                # This magically turns your data into a beautiful table!
-                st.table(schedule) 
-            else:
-                st.info("Your calendar is completely empty!")
-        else:
-            st.error("Failed to connect to the database.")
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # Display chat history
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Chat Input Box
+    if prompt := st.chat_input("E.g., Add 'Submit Hackathon' to tasks and book it for 4 PM"):
+        # 1. Show user message
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # 2. Send to FastAPI Backend
+        with st.spinner("Manager is coordinating with agents..."):
+            try:
+                response = requests.post(API_URL, json={"prompt": prompt})
+                if response.status_code == 200:
+                    reply = response.json().get("response", "Error reading response.")
+                else:
+                    reply = f"Backend Error: {response.status_code}"
+            except Exception as e:
+                reply = "⚠️ Failed to connect to backend. Is Uvicorn running?"
+
+        # 3. Show AI response
+        st.session_state.messages.append({"role": "assistant", "content": reply})
+        with st.chat_message("assistant"):
+            st.markdown(reply)
+
+# --- RIGHT COLUMN: Live Dashboards ---
+with col2:
+    st.subheader("📊 Live Database Views")
     
-    st.markdown("---")
+    # Helper function to safely load SQLite tables into Pandas DataFrames
+    def load_data(table_name):
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            query = f"SELECT * FROM {table_name}"
+            df = pd.read_sql(query, conn)
+            conn.close()
+            return df
+        except Exception:
+            return pd.DataFrame()
 
-# Store the chat history
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# Show previous messages
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# The Chat Input Box
-user_input = st.chat_input("Tell me what to schedule...")
-
-if user_input:
-    # 1. Show what the user typed
-    with st.chat_message("user"):
-        st.markdown(user_input)
-    st.session_state.messages.append({"role": "user", "content": user_input})
-
-    # 2. Send the text to YOUR Brain (The Cloud Run API)
-    response = requests.post(f"{API_URL}/schedule-task", json={"user_input": user_input})
-    
-    # 3. Read the AI's answer
-    if response.status_code == 200:
-        api_data = response.json()
-        
-        # If it's a success
-        if api_data.get("status") == "SUCCESS":
-            ai_reply = api_data["message"]
-            
-        # If there is a conflict
-        elif api_data.get("status") == "CONFLICT":
-            ai_reply = f"⚠️ **CONFLICT:** {api_data['message']} \n\n*Head to the API dashboard to resolve this using /resolve-conflict!*"
-            
-        else:
-            ai_reply = "Hmm, I didn't understand that."
+    # 1. To-Do List Table
+    st.markdown("### 📋 To-Do List (Task Agent)")
+    tasks_df = load_data("tasks")
+    if not tasks_df.empty:
+        # Drop the 'id' column to make it look cleaner for the judges
+        st.dataframe(tasks_df.drop(columns=['id'], errors='ignore'), use_container_width=True)
     else:
-        ai_reply = "Error connecting to the Brain!"
+        st.info("No tasks added yet.")
 
-    # 4. Show the AI's answer on the screen
-    with st.chat_message("assistant"):
-        st.markdown(ai_reply)
-    st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+    # 2. Schedule Table
+    st.markdown("### 📅 Schedule (Calendar Agent)")
+    calendar_df = load_data("calendar")
+    if not calendar_df.empty:
+        st.dataframe(calendar_df.drop(columns=['id'], errors='ignore'), use_container_width=True)
+    else:
+        st.info("No events scheduled yet.")
+        
+    # Auto-refresh note
+    st.caption("💡 Dashboards refresh automatically when you send a new message.")

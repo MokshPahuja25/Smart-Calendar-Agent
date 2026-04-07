@@ -1,4 +1,7 @@
 fastapi
 uvicorn
 pydantic
-langchain-google-genai
+google-generativeai
+streamlit
+pandas
+requests
