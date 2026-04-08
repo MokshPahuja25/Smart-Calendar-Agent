@@ -8,7 +8,7 @@ st.set_page_config(page_title="Multi-Agent Assistant", layout="wide")
 st.title("🤖 Multi-Agent Productivity Assistant")
 
 # FastAPI backend URL and Database name
-API_URL = "http://127.0.0.1:8080/chat"
+API_URL = "https://calendar-backend-761950427575.asia-south2.run.app/chat"
 DB_NAME = "my_calendar.db"
 
 # --- Layout: Two Columns ---
@@ -54,14 +54,18 @@ with col1:
 with col2:
     st.subheader("📊 Live Database Views")
     
-    # Helper function to safely load SQLite tables into Pandas DataFrames
+    # Helper function to safely load data directly from the Live Backend
     def load_data(table_name):
         try:
-            conn = sqlite3.connect(DB_NAME)
-            query = f"SELECT * FROM {table_name}"
-            df = pd.read_sql(query, conn)
-            conn.close()
-            return df
+            # Get the exact URL of your backend database endpoint
+            data_url = f"https://calendar-backend-761950427575.asia-south2.run.app/table/{table_name}"
+            response = requests.get(data_url)
+            
+            if response.status_code == 200:
+                data = response.json()
+                return pd.DataFrame(data)
+            else:
+                return pd.DataFrame()
         except Exception:
             return pd.DataFrame()
 

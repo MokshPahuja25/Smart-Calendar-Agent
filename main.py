@@ -53,6 +53,20 @@ async def chat_endpoint(request: UserRequest):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@app.get("/table/{name}")
+def get_table(name: str):
+    import sqlite3
+    try:
+        conn = sqlite3.connect('my_calendar.db')
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT * FROM {name}")
+        data = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return data
+    except Exception as e:
+        return []
+
 # Basic health check endpoint
 @app.get("/")
 def read_root():
